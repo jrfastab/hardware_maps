@@ -20,6 +20,39 @@
 
 /* Netlink description:
  *
+ * Table definition used to describe running tables. The following
+ * describes the netlink message returned from a get tables request.
+ * For ADD_FLOW, DELETE_FLOW, and UPDATE Flow only the following
+ * attributes need to be provided, NET_MAT_TABLE_ATTR_UID and at least
+ * one complete NET_MAT_RULE attribute.
+ *
+ * [NET_MAT_TABLE_IDENTIFIER_TYPE]
+ * [NET_MAT_TABLE_IDENTIFIER]
+ * [NET_MAT_TABLE_TABLES]
+ *     [NET_MAT_TABLE]
+ *       [NET_MAT_TABLE_ATTR_NAME]
+ *       [NET_MAT_TABLE_ATTR_UID]
+ *       [NET_MAT_TABLE_ATTR_SOURCE]
+ *       [NET_MAT_TABLE_ATTR_SIZE]
+ *	 [NET_MAT_TABLE_ATTR_MATCHES]
+ *	   [NET_MAT_FIELD_REF]
+ *	   [NET_MAT_FIELD_REF]
+ *	     [...]
+ *	   [...]
+ *	 [NET_MAT_TABLE_ATTR_ACTIONS]
+ *	   [NET_MAT_ACTION]
+ *	     [NET_MAT_ACTION_ATTR_NAME]
+ *	     [NET_MAT_ACTION_ATTR_UID]
+ *	     [NET_MAT_ACTION_ATTR_SIGNATURE]
+ *		 [NET_MAT_ACTION_ARG]
+ *	         [NET_MAT_ACTION_ARG]
+ *	         [...]
+ *	   [NET_MAT_ACTION]
+ *	     [...]
+ *	   [...]
+ *     [NET_MAT_TABLE]
+ *       [...]
+ *
  * Header definitions used to define headers with user friendly
  * names.
  *
@@ -318,6 +351,57 @@ enum {
 };
 #define NET_MAT_HEADER_GRAPH_MAX (__NET_MAT_HEADER_GRAPH_MAX - 1)
 
+/**
+ * @struct net_mat_table
+ * @brief define flow table with supported match/actions
+ *
+ * @uid unique identifier for table
+ * @source uid of parent table
+ * @size max number of entries for table or -1 for unbounded
+ * @type indicate how table is exposed to networking stack
+ * @matches null terminated set of supported match types given by match uid
+ * @actions null terminated set of supported action types given by action uid
+ * @flows set of flows
+ */
+struct net_mat_table {
+	char name[IFNAMSIZ];
+	__u32 uid;
+	__u32 source;
+	__u32 apply_action;
+	__u32 size;
+	__u32 type;
+	struct net_mat_field_ref *matches;
+	net_mat_action_ref *actions;
+};
+
+enum {
+	NET_MAT_TABLE_UNSPEC,
+	NET_MAT_TABLE,
+	__NET_MAT_TABLE_MAX,
+};
+#define NET_MAT_TABLE_MAX (__NET_MAT_TABLE_MAX - 1)
+
+enum {
+	NET_MAT_TABLE_TYPE_L2,
+	NET_MAT_TABLE_TYPE_L3,
+	NET_MAT_TABLE_TYPE_BPFMAP,
+};
+
+enum {
+	NET_MAT_TABLE_ATTR_UNSPEC,
+	NET_MAT_TABLE_ATTR_NAME,
+	NET_MAT_TABLE_ATTR_UID,
+	NET_MAT_TABLE_ATTR_SOURCE,
+	NET_MAT_TABLE_ATTR_APPLY,
+	NET_MAT_TABLE_ATTR_SIZE,
+	NET_MAT_TABLE_ATTR_TYPE,
+	NET_MAT_TABLE_ATTR_MATCHES,
+	NET_MAT_TABLE_ATTR_ACTIONS,
+	__NET_MAT_TABLE_ATTR_MAX,
+};
+#define NET_MAT_TABLE_ATTR_MAX (__NET_MAT_TABLE_ATTR_MAX - 1)
+
+
 enum {
 	NET_MAT_IDNETIFIER_UNSPEC,
 	NET_MAT_IDENTIFIER_IFINDEX, /* net_device ifindex */
@@ -328,6 +412,7 @@ enum {
 	NET_MAT_IDENTIFIER_TYPE,
 	NET_MAT_IDENTIFIER,
 
+	NET_MAT_TABLES,
 	NET_MAT_HEADERS,
 	NET_MAT_ACTIONS,
 	NET_MAT_HEADER_GRAPH,
@@ -337,9 +422,11 @@ enum {
 };
 
 enum {
+	NET_MAT_TABLE_CMD_GET_TABLES,
 	NET_MAT_TABLE_CMD_GET_HEADERS,
 	NET_MAT_TABLE_CMD_GET_ACTIONS,
 	NET_MAT_TABLE_CMD_GET_HEADER_GRAPH,
+	NET_MAT_TABLE_CMD_GET_TABLE_GRAPH,
 
 	__NET_MAT_CMD_MAX,
 	NET_MAT_CMD_MAX = (__NET_MAT_CMD_MAX - 1),

@@ -1227,6 +1227,7 @@ struct net_device_ops {
 	int			(*ndo_get_iflink)(const struct net_device *dev);
 	int			(*ndo_change_proto_down)(struct net_device *dev,
 							 bool proto_down);
+	struct net_mat_table	**(*ndo_mat_get_tables)(struct net_device *dev);
 	struct net_mat_header	**(*ndo_mat_get_headers)(struct net_device *dev);
 	struct net_mat_action  **(*ndo_mat_get_actions)(struct net_device *dev);
 	struct net_mat_header_node **(*ndo_mat_get_hdr_graph)(struct net_device *dev);
