@@ -18,6 +18,8 @@
 #include <linux/filter.h>
 #include <linux/version.h>
 
+#include <linux/netdevice.h>
+
 static LIST_HEAD(bpf_map_types);
 
 static struct bpf_map *find_and_alloc_map(union bpf_attr *attr)
@@ -63,6 +65,7 @@ void bpf_map_put(struct bpf_map *map)
 		schedule_work(&map->work);
 	}
 }
+EXPORT_SYMBOL_GPL(bpf_map_put);
 
 static int bpf_map_release(struct inode *inode, struct file *filp)
 {
@@ -140,12 +143,27 @@ struct bpf_map *bpf_map_get(struct fd f)
 
 	return map;
 }
+EXPORT_SYMBOL_GPL(bpf_map_get);
 
 /* helper to convert user pointers passed inside __aligned_u64 fields */
 static void __user *u64_to_ptr(__u64 val)
 {
 	return (void __user *) (unsigned long) val;
 }
+
+int bpf_map_bind_offload(struct net_device *dev, int uid)
+{
+	struct fd f = fdget(uid);
+	struct bpf_map *map = bpf_map_get(f);
+
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	map->uid = uid;
+	map->netdev = dev;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(bpf_map_bind_offload);
 
 /* last field in 'union bpf_attr' used by this command */
 #define BPF_MAP_LOOKUP_ELEM_LAST_FIELD value
@@ -250,6 +268,13 @@ static int map_update_elem(union bpf_attr *attr)
 	 */
 	rcu_read_lock();
 	err = map->ops->map_update_elem(map, key, value, attr->flags);
+	if (!err && map->netdev) {
+		const struct net_device_ops *ops = map->netdev->netdev_ops;
+
+		ops->ndo_bpf_map_update(map->netdev, map->uid,
+					key, map->key_size,
+					value, map->value_size);
+	}
 	rcu_read_unlock();
 
 free_value:
@@ -291,6 +316,9 @@ static int map_delete_elem(union bpf_attr *attr)
 
 	rcu_read_lock();
 	err = map->ops->map_delete_elem(map, key);
+	if (!err && map->netdev)
+		map->netdev->netdev_ops->ndo_bpf_map_delete(map->netdev,
+							    map->uid);
 	rcu_read_unlock();
 
 free_key:

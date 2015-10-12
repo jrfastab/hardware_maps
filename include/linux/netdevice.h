@@ -1233,6 +1233,8 @@ struct net_device_ops {
 	struct net_mat_header_node **(*ndo_mat_get_hdr_graph)(struct net_device *dev);
 	int  (*ndo_mat_create_table)(struct net_device *dev,
 				     struct net_mat_table *t);
+	void			(*ndo_bpf_map_update)(struct net_device *, int, void *, int, void *, int);
+	void			(*ndo_bpf_map_delete)(struct net_device *, int);
 };
 
 /**

@@ -39,6 +39,8 @@ struct bpf_map {
 	u32 max_entries;
 	const struct bpf_map_ops *ops;
 	struct work_struct work;
+	struct net_device *netdev;
+	int uid;
 };
 
 struct bpf_map_type_list {
@@ -156,6 +158,9 @@ u64 bpf_tail_call(u64 ctx, u64 r2, u64 index, u64 r4, u64 r5);
 void bpf_fd_array_map_clear(struct bpf_map *map);
 bool bpf_prog_array_compatible(struct bpf_array *array, const struct bpf_prog *fp);
 const struct bpf_func_proto *bpf_get_trace_printk_proto(void);
+
+int bpf_map_bind_offload(struct net_device *dev, int uid);
+int bpf_map_unbind_offload(int uid);
 
 #ifdef CONFIG_BPF_SYSCALL
 void bpf_register_prog_type(struct bpf_prog_type_list *tl);
