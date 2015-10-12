@@ -27,6 +27,8 @@
 #include <net/rtnetlink.h>
 #include <linux/module.h>
 
+#include <linux/bpf.h>
+
 static struct genl_family net_mat_nl_family = {
 	.id		= GENL_ID_GENERATE,
 	.name		= NET_MAT_GENL_NAME,
@@ -893,6 +895,59 @@ matches_err_out:
 	return err;
 }
 
+static int is_create_table_type_ok(struct net_device *dev,
+				   struct net_mat_table *table)
+{
+	struct fd f;
+	struct bpf_map *map;
+
+	switch (table->type) {
+	case NET_MAT_TABLE_TYPE_BPFMAP:
+		/* Verify the map aligns with the table arguments and the
+		 * netdevice supports the callbacks to do the map. This also
+		 * increments the refcnt on the file which ensures it will
+		 * not disappear with the hardware set to use it.
+		 */
+		if (!dev->netdev_ops->ndo_bpf_map_update ||
+		    !dev->netdev_ops->ndo_bpf_map_delete)
+			return -EOPNOTSUPP;
+
+		f = fdget(table->bpf_map_arg);
+		map = bpf_map_get(f);
+		if (IS_ERR(map))
+			return PTR_ERR(map);
+
+		/* For now only support maps that can be entirely loaded into
+		 * hardware. It probably doesn't make sense to do a partial
+		 * load here anyways. Users should be able to align tables
+		 * and/or hardware resources if needed. Worst case is we simply
+		 * fallback to software.
+		 */
+		if (map->max_entries > table->size) {
+			bpf_map_put(map);
+			return -EINVAL;
+		}
+
+		break;
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+static void post_create_table_type(struct net_device *dev,
+				   struct net_mat_table *table)
+{
+	switch (table->type) {
+	case NET_MAT_TABLE_TYPE_BPFMAP:
+		bpf_map_bind_offload(dev, table->bpf_map_arg);
+		break;
+	default:
+		break;
+	}
+}
+
 static int net_mat_table_cmd_create_tables(struct sk_buff *skb,
 					   struct genl_info *info)
 {
@@ -924,6 +979,13 @@ static int net_mat_table_cmd_create_tables(struct sk_buff *skb,
 		if (err)
 			goto out;
 
+		/* Before we provision the hardware we may need to verify any
+		 * 'type' specific hooks are supported.
+		 */
+		err = is_create_table_type_ok(dev, &this);
+		if (err)
+			goto out;
+
 		err = dev->netdev_ops->ndo_mat_create_table(dev, &this);
 
 		/* Cleanup table */
@@ -932,6 +994,14 @@ static int net_mat_table_cmd_create_tables(struct sk_buff *skb,
 
 		if (err)
 			goto out;
+
+		/* The hardware is setup at this point so we can do 'type'
+		 * specific initialization codes here. This can not fail and
+		 * any failing conditions need to be handled by the device
+		 * specific create_table callback or the generic table_type_ok
+		 * check.
+		 */
+		post_create_table_type(dev, &this);
 	}
 
 out:

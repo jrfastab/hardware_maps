@@ -359,6 +359,7 @@ enum {
  * @source uid of parent table
  * @size max number of entries for table or -1 for unbounded
  * @type indicate how table is exposed to networking stack
+ * @type_arg argument for table bind type
  * @matches null terminated set of supported match types given by match uid
  * @actions null terminated set of supported action types given by action uid
  * @flows set of flows
@@ -370,6 +371,9 @@ struct net_mat_table {
 	__u32 apply_action;
 	__u32 size;
 	__u32 type;
+	union {
+		__u32 bpf_map_arg;
+	};
 	struct net_mat_field_ref *matches;
 	net_mat_action_ref *actions;
 };
@@ -395,6 +399,7 @@ enum {
 	NET_MAT_TABLE_ATTR_APPLY,
 	NET_MAT_TABLE_ATTR_SIZE,
 	NET_MAT_TABLE_ATTR_TYPE,
+	NET_MAT_TABLE_ATTR_TYPE_ARG,
 	NET_MAT_TABLE_ATTR_MATCHES,
 	NET_MAT_TABLE_ATTR_ACTIONS,
 	__NET_MAT_TABLE_ATTR_MAX,
