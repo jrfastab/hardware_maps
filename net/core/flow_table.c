@@ -768,6 +768,183 @@ static int net_mat_table_cmd_get_tables(struct sk_buff *skb,
 	return genlmsg_reply(msg, info);
 }
 
+static struct nla_policy net_mat_field_policy[NET_MAT_FIELD_REF_MAX + 1] = {
+	[NET_MAT_FIELD_REF_INSTANCE]	= { .type = NLA_U32,},
+	[NET_MAT_FIELD_REF_HEADER]	= { .type = NLA_U32,},
+	[NET_MAT_FIELD_REF_FIELD]	= { .type = NLA_U32,},
+	[NET_MAT_FIELD_REF_MASK_TYPE]	= { .type = NLA_U32,},
+};
+
+static int net_mat_get_field(struct net_mat_field_ref *field,
+			     struct nlattr *nla)
+{
+	struct nlattr *ref[NET_MAT_FIELD_REF_MAX + 1];
+	int err;
+
+	if (nla_type(nla) != NET_MAT_FIELD_REF)
+		return -EINVAL;
+
+	err = nla_parse_nested(ref, NET_MAT_FIELD_REF_MAX,
+			       nla, net_mat_field_policy);
+	if (err)
+		return err;
+
+	if (!ref[NET_MAT_FIELD_REF_INSTANCE] ||
+	    !ref[NET_MAT_FIELD_REF_FIELD])
+		return -EINVAL;
+
+	field->instance = nla_get_u32(ref[NET_MAT_FIELD_REF_INSTANCE]);
+	field->field = nla_get_u32(ref[NET_MAT_FIELD_REF_FIELD]);
+
+	if (ref[NET_MAT_FIELD_REF_MASK_TYPE])
+		field->mask_type = nla_get_u32(ref[NET_MAT_FIELD_REF_MASK_TYPE]);
+
+	return 0;
+}
+
+static const
+struct nla_policy net_mat_table_policy[NET_MAT_TABLE_ATTR_MAX + 1] = {
+	[NET_MAT_TABLE_ATTR_NAME]	= { .type = NLA_STRING,
+					    .len = IFNAMSIZ - 1 },
+	[NET_MAT_TABLE_ATTR_UID]	= { .type = NLA_U32 },
+	[NET_MAT_TABLE_ATTR_SOURCE]	= { .type = NLA_U32 },
+	[NET_MAT_TABLE_ATTR_SIZE]	= { .type = NLA_U32 },
+	[NET_MAT_TABLE_ATTR_TYPE]	= { .type = NLA_U32 },
+	[NET_MAT_TABLE_ATTR_MATCHES]	= { .type = NLA_NESTED },
+	[NET_MAT_TABLE_ATTR_ACTIONS]	= { .type = NLA_NESTED },
+};
+
+static int net_mat_get_table(struct net_mat_table *table, struct nlattr *nla)
+{
+	struct nlattr *tbl[NET_MAT_TABLE_ATTR_MAX + 1];
+	struct nlattr *i;
+	int cnt, rem, err;
+
+	err = nla_parse_nested(tbl, NET_MAT_TABLE_ATTR_MAX,
+			       nla, net_mat_table_policy);
+	if (err)
+		return err;
+
+	if (tbl[NET_MAT_TABLE_ATTR_NAME])
+		nla_strlcpy(table->name,
+			    tbl[NET_MAT_TABLE_ATTR_NAME], IFNAMSIZ - 1);
+
+	table->uid = tbl[NET_MAT_TABLE_ATTR_UID] ?
+		     nla_get_u32(tbl[NET_MAT_TABLE_ATTR_UID]) : 0;
+
+	table->source = tbl[NET_MAT_TABLE_ATTR_SOURCE] ?
+			nla_get_u32(tbl[NET_MAT_TABLE_ATTR_SOURCE]) : 0;
+
+	table->size = tbl[NET_MAT_TABLE_ATTR_SIZE] ?
+		      nla_get_u32(tbl[NET_MAT_TABLE_ATTR_SIZE]) : 0;
+
+	if (tbl[NET_MAT_TABLE_ATTR_MATCHES]) {
+		cnt = 0;
+		nla_for_each_nested(i, tbl[NET_MAT_TABLE_ATTR_MATCHES], rem)
+			cnt++;
+
+		/* Null terminated list of matches */
+		table->matches = kcalloc(cnt + 1,
+					 sizeof(struct net_mat_field_ref),
+					 GFP_KERNEL);
+		if (!table->matches)
+			return -ENOMEM;
+
+		cnt = 0;
+		nla_for_each_nested(i, tbl[NET_MAT_TABLE_ATTR_MATCHES], rem) {
+			err = net_mat_get_field(&table->matches[cnt], i);
+			if (err)
+				goto matches_err_out;
+			cnt++;
+		}
+	}
+
+	if (tbl[NET_MAT_TABLE_ATTR_ACTIONS]) {
+		cnt = 0;
+		nla_for_each_nested(i, tbl[NET_MAT_TABLE_ATTR_ACTIONS], rem)
+			cnt++;
+
+		table->actions = kcalloc(cnt + 1,
+					 sizeof(struct net_mat_field_ref),
+					 GFP_KERNEL);
+		if (!table->actions) {
+			err = -ENOMEM;
+			goto matches_err_out;
+		}
+
+		cnt = 0;
+		err = -EINVAL;
+
+		nla_for_each_nested(i, tbl[NET_MAT_TABLE_ATTR_ACTIONS], rem) {
+			if (nla_type(i) != NET_MAT_ACTION_ATTR_UID)
+				continue;
+			if (nla_len(nla) < sizeof(u32))
+				goto action_err_out;
+			table->actions[cnt] = nla_get_u32(i);
+			cnt++;
+		}
+	}
+
+	return 0;
+action_err_out:
+	kfree(table->actions);
+matches_err_out:
+	kfree(table->matches);
+	return err;
+}
+
+static int net_mat_table_cmd_create_tables(struct sk_buff *skb,
+					   struct genl_info *info)
+{
+	struct net_device *dev;
+	struct nlattr *tattr;
+	int rem, err = -EINVAL;
+
+	dev = net_mat_get_dev(info);
+	if (!dev)
+		return -EINVAL;
+
+	if (!dev->netdev_ops->ndo_mat_create_table) {
+		dev_put(dev);
+		return -EOPNOTSUPP;
+	}
+
+	if (!info->attrs[NET_MAT_IDENTIFIER_TYPE] ||
+	    !info->attrs[NET_MAT_IDENTIFIER] ||
+	    !info->attrs[NET_MAT_TABLES])
+		goto out;
+
+	nla_for_each_nested(tattr, info->attrs[NET_MAT_TABLES], rem) {
+		struct net_mat_table this = {.name = "", .uid = 0,};
+
+		if (nla_type(tattr) != NET_MAT_TABLE)
+			continue;
+
+		err = net_mat_get_table(&this, tattr);
+		if (err)
+			goto out;
+
+		err = dev->netdev_ops->ndo_mat_create_table(dev, &this);
+
+		/* Cleanup table */
+		kfree(this.matches);
+		kfree(this.actions);
+
+		if (err)
+			goto out;
+	}
+
+out:
+	dev_put(dev);
+	return err;
+}
+
+static int net_mat_table_cmd_destroy_tables(struct sk_buff *skb,
+					    struct genl_info *info)
+{
+	return -EOPNOTSUPP;
+}
+
 static const struct genl_ops net_mat_table_nl_ops[] = {
 	{
 		.cmd = NET_MAT_TABLE_CMD_GET_TABLES,
@@ -787,6 +964,16 @@ static const struct genl_ops net_mat_table_nl_ops[] = {
 	{
 		.cmd = NET_MAT_TABLE_CMD_GET_HEADER_GRAPH,
 		.doit = net_mat_table_cmd_get_header_graph,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = NET_MAT_TABLE_CMD_CREATE_TABLE,
+		.doit = net_mat_table_cmd_create_tables,
+		.flags = GENL_ADMIN_PERM,
+	},
+	{
+		.cmd = NET_MAT_TABLE_CMD_DESTROY_TABLE,
+		.doit = net_mat_table_cmd_destroy_tables,
 		.flags = GENL_ADMIN_PERM,
 	},
 };

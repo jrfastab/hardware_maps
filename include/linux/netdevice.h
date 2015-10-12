@@ -1231,6 +1231,8 @@ struct net_device_ops {
 	struct net_mat_header	**(*ndo_mat_get_headers)(struct net_device *dev);
 	struct net_mat_action  **(*ndo_mat_get_actions)(struct net_device *dev);
 	struct net_mat_header_node **(*ndo_mat_get_hdr_graph)(struct net_device *dev);
+	int  (*ndo_mat_create_table)(struct net_device *dev,
+				     struct net_mat_table *t);
 };
 
 /**
